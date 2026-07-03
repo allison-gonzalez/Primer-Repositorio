@@ -13,8 +13,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mobileapp.common.HealthMetrics
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
@@ -22,8 +22,17 @@ import java.util.*
 
 @Composable
 fun CompanionDashboard(history: List<HealthMetrics>) {
-    val scope = rememberCoroutineScope()
-    var httpResponse by remember { mutableStateOf("") }
+    var lastSyncStatus by remember { mutableStateOf("Esperando datos...") }
+
+    // Sincronización automática con la API cada vez que llega un nuevo dato
+    val latestMetric = history.lastOrNull()
+    LaunchedEffect(latestMetric) {
+        latestMetric?.let {
+            lastSyncStatus = "Sincronizando..."
+            val result = syncWithApi(it)
+            lastSyncStatus = result
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -31,11 +40,24 @@ fun CompanionDashboard(history: List<HealthMetrics>) {
             .padding(16.dp)
     ) {
         Text(
-            text = "Companion Dashboard",
+            text = "Unidad 1 - Dashboard",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
         
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Estado de la Base de Datos (Postgres vía API)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(text = "Estado Postgres:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(text = lastSyncStatus, fontSize = 14.sp)
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         
         Card(
@@ -43,56 +65,18 @@ fun CompanionDashboard(history: List<HealthMetrics>) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = "Resumen de Hoy", fontWeight = FontWeight.Bold)
-                val latest = history.lastOrNull() ?: HealthMetrics()
-                Text(text = "Total Pasos: ${latest.steps}")
-                Text(text = "Distancia: %.2f Km".format(latest.distanceKm))
-                Text(text = "Calorías: %.1f kcal".format(latest.calories))
+                Text(text = "Lectura Actual (3 Sensores)", fontWeight = FontWeight.Bold)
+                latestMetric?.let {
+                    Text(text = "1. Ritmo: ${it.heartRate} BPM")
+                    Text(text = "2. Pasos: ${it.steps}")
+                    Text(text = "3. Acelerómetro: X:%.2f, Y:%.2f, Z:%.2f".format(it.accelX, it.accelY, it.accelZ))
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // HTTP Buttons Section
-        Text(text = "Sincronización Cloud", fontWeight = FontWeight.SemiBold)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = {
-                    scope.launch {
-                        httpResponse = performHttpRequest("GET")
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("GET Data")
-            }
-            Button(
-                onClick = {
-                    scope.launch {
-                        httpResponse = performHttpRequest("POST")
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("POST Data")
-            }
-        }
-
-        if (httpResponse.isNotEmpty()) {
-            Text(
-                text = "Respuesta: $httpResponse",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(text = "Historial Reciente", fontWeight = FontWeight.SemiBold)
+        Text(text = "Historial en Memoria", fontWeight = FontWeight.SemiBold)
         
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(history.reversed()) { metric ->
@@ -108,43 +92,35 @@ fun MetricItem(metric: HealthMetrics) {
     val time = sdf.format(Date(metric.timestamp))
     
     ListItem(
-        headlineContent = { Text("Frecuencia: ${metric.heartRate} BPM") },
-        supportingContent = { Text("Pasos: ${metric.steps} | $time") },
-        trailingContent = {
-            if (metric.heartRate > 100) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Alerta",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
-        }
+        headlineContent = { Text("FC: ${metric.heartRate} | Pasos: ${metric.steps}") },
+        supportingContent = { Text("Acc: [${"%.1f".format(metric.accelX)}, ${"%.1f".format(metric.accelY)}, ${"%.1f".format(metric.accelZ)}] | $time") }
     )
 }
 
-suspend fun performHttpRequest(method: String): String = withContext(Dispatchers.IO) {
+suspend fun syncWithApi(metrics: HealthMetrics): String = withContext(Dispatchers.IO) {
     try {
-        val url = if (method == "GET") {
-            URL("https://jsonplaceholder.typicode.com/posts/1")
-        } else {
-            URL("https://jsonplaceholder.typicode.com/posts")
-        }
+        val url = URL("http://192.168.195.97:5000/api/Sensores") // Ajustar puerto si es necesario (5000 o 5022)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.doOutput = true
 
-        with(url.openConnection() as HttpURLConnection) {
-            requestMethod = method
-            if (method == "POST") {
-                doOutput = true
-                outputStream.write("{\"title\": \"HealthData\", \"body\": \"Sync\", \"userId\": 1}".toByteArray())
+        val json = """
+            {
+                "dispositivoId": "${metrics.deviceId}",
+                "heartRate": ${metrics.heartRate},
+                "accelX": ${metrics.accelX},
+                "accelY": ${metrics.accelY},
+                "accelZ": ${metrics.accelZ},
+                "steps": ${metrics.steps}
             }
-            
-            val responseCode = responseCode
-            if (responseCode in 200..299) {
-                "Éxito ($responseCode)"
-            } else {
-                "Error ($responseCode)"
-            }
-        }
+        """.trimIndent()
+
+        OutputStreamWriter(conn.outputStream).use { it.write(json) }
+
+        val code = conn.responseCode
+        if (code in 200..299) "Enviado a Postgres (200 OK)" else "Error API ($code)"
     } catch (e: Exception) {
-        "Fallo: ${e.message}"
+        "Fallo conexión: ${e.message}"
     }
 }

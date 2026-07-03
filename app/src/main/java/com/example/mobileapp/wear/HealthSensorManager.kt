@@ -11,28 +11,29 @@ class HealthSensorManager {
     fun getMetricsFlow(): Flow<HealthMetrics> = flow {
         var steps = 0
         while (true) {
+            // Sensor 1: Frecuencia Cardiaca
             val heartRate = Random.nextInt(60, 120)
-            steps += Random.nextInt(0, 5)
-            val calories = steps * 0.04
-            val distance = steps * 0.0008
+            
+            // Sensor 2: Podómetro (Pasos)
+            steps += Random.nextInt(0, 3)
+            
+            // Sensor 3: Acelerómetro (Ejes X, Y, Z)
+            val accelX = Random.nextFloat() * 2 - 1 // Simula entre -1 y 1
+            val accelY = 9.8f + (Random.nextFloat() * 2 - 1) // Cerca de la gravedad
+            val accelZ = Random.nextFloat() * 2 - 1
 
             emit(HealthMetrics(
                 heartRate = heartRate,
                 steps = steps,
-                calories = calories,
-                distanceKm = distance
+                accelX = accelX,
+                accelY = accelY,
+                accelZ = accelZ
             ))
-            delay(2000) // Emit every 2 seconds
+            delay(3000) // Emitir cada 3 segundos para no saturar la API
         }
     }
 
     fun checkAlerts(metrics: HealthMetrics): String? {
-        return if (metrics.heartRate > 100) {
-            "¡Alerta! Frecuencia cardiaca elevada: ${metrics.heartRate} BPM"
-        } else if (metrics.heartRate < 50) {
-            "¡Alerta! Frecuencia cardiaca baja: ${metrics.heartRate} BPM"
-        } else {
-            null
-        }
+        return if (metrics.heartRate > 100) "¡Alerta! Ritmo cardiaco alto" else null
     }
 }
