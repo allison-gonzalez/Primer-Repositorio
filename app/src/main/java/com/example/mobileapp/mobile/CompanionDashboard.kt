@@ -3,11 +3,9 @@ package com.example.mobileapp.mobile
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -96,7 +94,7 @@ fun CompanionDashboard(history: List<HealthMetrics>) {
 
         Text(text = "Historial Reciente", fontWeight = FontWeight.SemiBold)
         
-        LazyColumn(modifier = Modifier.fillWeight(1f)) {
+        LazyColumn(modifier = Modifier.weight(1f)) {
             items(history.reversed()) { metric ->
                 MetricItem(metric)
             }
@@ -104,9 +102,28 @@ fun CompanionDashboard(history: List<HealthMetrics>) {
     }
 }
 
+@Composable
+fun MetricItem(metric: HealthMetrics) {
+    val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    val time = sdf.format(Date(metric.timestamp))
+    
+    ListItem(
+        headlineContent = { Text("Frecuencia: ${metric.heartRate} BPM") },
+        supportingContent = { Text("Pasos: ${metric.steps} | $time") },
+        trailingContent = {
+            if (metric.heartRate > 100) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Alerta",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    )
+}
+
 suspend fun performHttpRequest(method: String): String = withContext(Dispatchers.IO) {
     try {
-        // Usamos una URL de prueba pública (jsonplaceholder)
         val url = if (method == "GET") {
             URL("https://jsonplaceholder.typicode.com/posts/1")
         } else {
