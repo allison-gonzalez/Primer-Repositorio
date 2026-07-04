@@ -56,6 +56,38 @@ fun CompanionDashboard(history: List<HealthMetrics>) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Sección de Botones HTTP GET/POST (Requerimiento)
+        val scope = rememberCoroutineScope()
+        Text("Pruebas HTTP API", fontWeight = FontWeight.SemiBold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { 
+                scope.launch { 
+                    lastSyncStatus = "Probando GET..."
+                    val client = OkHttpClient()
+                    val request = Request.Builder().url("https://jsonplaceholder.typicode.com/posts/1").build()
+                    withContext(Dispatchers.IO) {
+                        try { client.newCall(request).execute().use { lastSyncStatus = "GET: ${it.code} OK" } }
+                        catch (e: Exception) { lastSyncStatus = "GET Falló: ${e.message}" }
+                    }
+                }
+            }, modifier = Modifier.weight(1f)) { Text("GET") }
+            
+            Button(onClick = { 
+                scope.launch { 
+                    lastSyncStatus = "Probando POST..."
+                    val client = OkHttpClient()
+                    val body = "{}".toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder().url("https://jsonplaceholder.typicode.com/posts").post(body).build()
+                    withContext(Dispatchers.IO) {
+                        try { client.newCall(request).execute().use { lastSyncStatus = "POST: ${it.code} OK" } }
+                        catch (e: Exception) { lastSyncStatus = "POST Falló: ${e.message}" }
+                    }
+                }
+            }, modifier = Modifier.weight(1f)) { Text("POST") }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(history.reversed()) { MetricItem(it) }
         }
