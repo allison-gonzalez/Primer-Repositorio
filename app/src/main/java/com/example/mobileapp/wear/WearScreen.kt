@@ -1,107 +1,74 @@
 package com.example.mobileapp.wear
 
+import android.content.Context
+import android.content.Intent
+import android.os.Vibrator
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mobileapp.common.HealthMetrics
+import com.example.mobileapp.mobile.DetailsActivity
 
 @Composable
 fun WearScreen(metrics: HealthMetrics, alert: String?) {
-    // Animación de pulso para el icono de sincronización
+    val context = LocalContext.current
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
+    // Vibración al detectar alerta (Punto 4 del PDF)
+    LaunchedEffect(alert) {
+        if (alert != null && vibrator.hasVibrator()) {
+            vibrator.vibrate(500)
+        }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "syncPulse")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
+        initialValue = 0.3f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
         label = "alpha"
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // Icono de Sincronización con animación
-            Icon(
-                imageVector = Icons.Default.Sync,
-                contentDescription = "Sincronizando",
-                tint = Color.Cyan,
-                modifier = Modifier
-                    .size(20.dp)
-                    .alpha(alpha)
-            )
-
-            Text(
-                text = "HealthWatch",
-                color = Color.Cyan,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
+            Icon(Icons.Default.Sync, null, tint = Color.Cyan, modifier = Modifier.size(16.dp).alpha(alpha))
+            Text("HealthWatch", color = Color.Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Text("${metrics.heartRate}", color = if (alert != null) Color.Red else Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+            Text("BPM", color = Color.Gray, fontSize = 10.sp)
 
-            // Heart Rate
-            Text(
-                text = "${metrics.heartRate}",
-                color = if (alert != null) Color.Red else Color.White,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(text = "BPM", color = Color.Gray, fontSize = 10.sp)
+            Row {
+                Text("${metrics.steps} Pasos", color = Color.White, fontSize = 12.sp)
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Steps & Accel Info
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(text = "${metrics.steps}", color = Color.White, fontSize = 14.sp)
-                    Text(text = "Pasos", color = Color.Gray, fontSize = 8.sp)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "X:%.1f Y:%.1f".format(metrics.accelX, metrics.accelY), 
-                        color = Color.White, 
-                        fontSize = 10.sp
-                    )
-                    Text(text = "Acel.", color = Color.Gray, fontSize = 8.sp)
-                }
+            // Botón para abrir segunda ventana (Punto 5 del PDF)
+            Button(
+                onClick = { 
+                    val intent = Intent(context, DetailsActivity::class.java)
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.height(28.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Text("Detalles", fontSize = 10.sp)
             }
 
             if (alert != null) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "ALERTA",
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .background(Color.Red, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Text("ALERTA", color = Color.White, fontSize = 8.sp, modifier = Modifier.background(Color.Red, CircleShape).padding(4.dp))
             }
         }
     }
