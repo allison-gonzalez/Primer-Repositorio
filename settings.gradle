@@ -1,2 +1,3 @@
 rootProject.name = "MobileApp"
 include ':app'
+include ':reloj'
