@@ -9,7 +9,12 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+*/build
 /captures
 .externalNativeBuild
 .cxx
 local.properties
+
+# Backend Node.js
+backend/node_modules/
+backend/.env

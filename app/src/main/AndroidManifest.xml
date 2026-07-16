@@ -5,8 +5,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BODY_SENSORS"/>
-    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+    <!-- RF-18: notificacion al recibir confirmacion de sincronizacion desde el reloj -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:allowBackup="true"
@@ -29,7 +31,7 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".mobile.DetailsActivity" android:exported="false" />
+        <activity android:name=".ui.GoalSettingsActivity" android:exported="false" />
     </application>
 
 </manifest>
