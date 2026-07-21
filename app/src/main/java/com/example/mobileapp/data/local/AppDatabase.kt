@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 // RNF-10: base de datos privada de la app (almacenamiento interno de Room),
 // no accesible por otras aplicaciones por defecto.
-@Database(entities = [HealthMetricEntity::class], version = 1, exportSchema = false)
+@Database(entities = [HealthMetricEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun healthMetricDao(): HealthMetricDao
 
@@ -21,7 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "healthwatch.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration(true).build().also { INSTANCE = it }
             }
     }
 }

@@ -1,9 +1,14 @@
 package com.example.mobileapp
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -52,6 +57,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         val db = AppDatabase.getInstance(applicationContext)
         repository = HealthRepository(db.healthMetricDao(), HealthWatchApiClient())
         userPreferences = UserPreferences(applicationContext)
+        requestNotificationPermissionIfNeeded()
 
         setContent {
             MaterialTheme {
@@ -69,13 +75,30 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }
     }
 
-    // RF-19: recibe HealthMetrics del reloj y los guarda en Room.
-    // Al recibir la confirmacion de sincronizacion del reloj, sincroniza lo pendiente al backend.
+    // Samsung solo reconoce esta app como companion valida del reloj si tiene concedido
+    // POST_NOTIFICATIONS (Notification4WatchManager.isValidPhoneApp), aunque la app no
+    // muestre notificaciones propias.
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2001)
+        }
+    }
+
+    // RF-19: recibe HealthMetrics del reloj, los guarda en Room y los reenvia a la API de
+    // inmediato (RF-20/backend), en cada lectura, no solo cuando el reloj hace flush de una
+    // cola pendiente tras una desconexion.
     override fun onMessageReceived(messageEvent: MessageEvent) {
+        Log.d("onMessageReceived", "path=${messageEvent.path} de ${messageEvent.sourceNodeId}")
         when (messageEvent.path) {
             Constants.PAYLOAD_PATH -> {
                 val metrics = json.decodeFromString<HealthMetrics>(String(messageEvent.data, Charsets.UTF_8))
-                lifecycleScope.launch { repository.saveIncoming(metrics) }
+                lifecycleScope.launch {
+                    repository.saveIncoming(metrics)
+                    repository.syncPendingToBackend()
+                }
             }
             Constants.SYNC_COMPLETE_PATH -> {
                 lifecycleScope.launch { repository.syncPendingToBackend() }
@@ -86,6 +109,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     override fun onResume() {
         super.onResume()
         Wearable.getMessageClient(this).addListener(this)
+        Log.d("onMessageReceived", "Listener registrado")
     }
 
     override fun onPause() {

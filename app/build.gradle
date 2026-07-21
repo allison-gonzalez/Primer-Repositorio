@@ -11,7 +11,11 @@ android {
 
     defaultConfig {
         // RNF-12: la aplicacion companion requiere Android 10.0 (API 29) o superior.
-        applicationId "com.example.mobileapp"
+        // El applicationId debe coincidir con el del modulo reloj (patron "proyecto siames"
+        // de la diapositiva de la clase: "el nombre del paquete debe ser el mismo al del
+        // primer modulo"). Dos apps en dispositivos fisicos distintos (telefono y reloj)
+        // pueden compartir applicationId sin chocar, ya que no compiten por el mismo device.
+        applicationId "com.example.reloj"
         minSdk 29
         targetSdk 37
         versionCode 1

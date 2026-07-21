@@ -1,24 +1,19 @@
 package com.example.reloj.presentation
 
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.compose.foundation.pager.HorizontalPager
 import androidx.wear.compose.foundation.pager.rememberPagerState
@@ -30,8 +25,7 @@ import com.example.reloj.metrics.MetricsCalculator
 import com.example.reloj.presentation.theme.RelojTheme
 import com.example.reloj.sensors.AccelReading
 import com.example.reloj.sensors.AccelerometerManager
-import com.example.reloj.sensors.HealthServicesManager
-import com.example.reloj.sensors.SensorReading
+import com.example.reloj.sensors.HealthSensorManager
 import com.example.reloj.sync.PendingSyncQueue
 import com.example.reloj.ui.DetailScreen
 import com.example.reloj.ui.SummaryScreen
@@ -47,14 +41,14 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 // Captura de sensores (RF-01/02/04/05), procesamiento y alertas (RF-06 a RF-10),
-// UI del reloj (RF-11 a RF-15) y transmision BLE al telefono (RF-16 a RF-18).
+// UI del reloj (RF-11 a RF-15) y transmision BLE al telefono (RF-16/RF-17).
 class MainActivity : ComponentActivity(),
     DataClient.OnDataChangedListener,
     MessageClient.OnMessageReceivedListener,
     CapabilityClient.OnCapabilityChangedListener {
 
     private var phoneNodeId: String? = null
-    private lateinit var healthServicesManager: HealthServicesManager
+    private lateinit var healthSensorManager: HealthSensorManager
     private lateinit var accelerometerManager: AccelerometerManager
     private lateinit var pendingSyncQueue: PendingSyncQueue
     private val json = Json { ignoreUnknownKeys = true }
@@ -65,22 +59,23 @@ class MainActivity : ComponentActivity(),
     private var isPhoneConnected by mutableStateOf(false)
     private var dailyStepGoal by mutableStateOf(Constants.DEFAULT_DAILY_STEP_GOAL)
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted ->
-        if (granted.values.all { it }) {
-            startCollectingMetrics()
-        } else {
-            metricsState = metricsState.copy(sensorError = "Permisos de sensores denegados")
+    // RF-16: envia el ultimo dato al telefono cada 5s sin depender de que llegue un evento
+    // nuevo de sensor (TYPE_STEP_COUNTER/TYPE_HEART_RATE solo disparan "on-change" y pueden
+    // tardar minutos en cambiar), igual que el Handler de la app de referencia.
+    private val sendHandler = Handler(Looper.getMainLooper())
+    private val sendRunnable = object : Runnable {
+        override fun run() {
+            sendMetricsToPhone(metricsState)
+            sendHandler.postDelayed(this, 5000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        healthServicesManager = HealthServicesManager(applicationContext)
+        healthSensorManager = HealthSensorManager(applicationContext)
+        healthSensorManager.onReading = { heartRate, steps -> onHealthReading(heartRate, steps) }
         accelerometerManager = AccelerometerManager(applicationContext)
         pendingSyncQueue = PendingSyncQueue(applicationContext)
-        createNotificationChannel()
         startCollectingAccelerometer()
 
         setContent {
@@ -105,12 +100,52 @@ class MainActivity : ComponentActivity(),
         requestHealthPermissionsIfNeeded()
     }
 
-    // RF-01/02: funcion dedicada de permisos runtime antes de usar los sensores (patron de la clase).
+    // RF-01/02: funcion dedicada de permisos runtime antes de usar los sensores (patron de la
+    // diapositiva de la clase). Si falta algun permiso se pide y se retorna sin registrar el
+    // sensor todavia; si ya estan concedidos se registra de inmediato.
     private fun requestHealthPermissionsIfNeeded() {
-        val missing = HealthServicesManager.REQUIRED_PERMISSIONS.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        val missing = HealthSensorManager.REQUIRED_PERMISSIONS.filter {
+            ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) startCollectingMetrics() else permissionLauncher.launch(missing.toTypedArray())
+        if (missing.isEmpty()) {
+            healthSensorManager.start()
+        } else {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), SENSOR_PERMISSION_REQUEST_CODE)
+        }
+    }
+
+    // Igual que la app de referencia: no se revisa grantResults, simplemente se reintenta
+    // registrar el sensor (registerListener es idempotente si el listener ya esta registrado).
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == SENSOR_PERMISSION_REQUEST_CODE) healthSensorManager.start()
+    }
+
+    private fun onHealthReading(heartRate: Int, steps: Int) {
+        heartRateHistory.add(heartRate)
+        if (heartRateHistory.size > 60) heartRateHistory.removeAt(0)
+
+        val metrics = HealthMetrics(
+            heartRate = heartRate,
+            steps = steps,
+            accelX = lastAccel.x,
+            accelY = lastAccel.y,
+            accelZ = lastAccel.z,
+            distanceMeters = MetricsCalculator.distanceMeters(steps),
+            calories = MetricsCalculator.caloriesMet(steps),
+            activityLevel = MetricsCalculator.activityLevel(steps),
+            heartRateZone = MetricsCalculator.heartRateZone(heartRate),
+            avgHeartRate5min = MetricsCalculator.average5min(heartRateHistory)
+        )
+        metricsState = metrics
+
+        if (AlertManager.isOutOfRange(heartRate)) {
+            AlertManager.triggerAlert(this)
+        }
     }
 
     // Tercer sensor (acelerometro nativo): sin permiso runtime, se colecciona de inmediato
@@ -125,55 +160,23 @@ class MainActivity : ComponentActivity(),
         }
     }
 
-    private fun startCollectingMetrics() {
-        lifecycleScope.launch {
-            healthServicesManager.readings().collect { reading ->
-                when (reading) {
-                    is SensorReading.Error -> {
-                        // RF-05: notificar cuando un sensor no este disponible o falle.
-                        metricsState = metricsState.copy(sensorError = reading.message)
-                    }
-                    is SensorReading.Data -> {
-                        heartRateHistory.add(reading.heartRate)
-                        if (heartRateHistory.size > 60) heartRateHistory.removeAt(0)
-
-                        val metrics = HealthMetrics(
-                            heartRate = reading.heartRate,
-                            steps = reading.steps,
-                            accelX = lastAccel.x,
-                            accelY = lastAccel.y,
-                            accelZ = lastAccel.z,
-                            distanceMeters = MetricsCalculator.distanceMeters(reading.steps),
-                            calories = MetricsCalculator.caloriesMet(reading.steps),
-                            activityLevel = MetricsCalculator.activityLevel(reading.steps),
-                            heartRateZone = MetricsCalculator.heartRateZone(reading.heartRate),
-                            avgHeartRate5min = MetricsCalculator.average5min(heartRateHistory),
-                            sensorError = null
-                        )
-                        metricsState = metrics
-
-                        if (AlertManager.isOutOfRange(reading.heartRate)) {
-                            AlertManager.triggerAlert(this@MainActivity)
-                        }
-                        sendMetricsToPhone(metrics)
-                    }
-                }
-            }
-        }
-    }
-
     // RF-16: sincroniza los datos de sensores con el telefono via Wearable Data Layer API.
     private fun sendMetricsToPhone(metrics: HealthMetrics) {
         val nodeId = phoneNodeId
         if (nodeId == null) {
+            Log.d("sendMessage", "Sin nodo de telefono, se encola")
             lifecycleScope.launch { pendingSyncQueue.enqueue(metrics) }
             return
         }
         val payload = json.encodeToString(metrics).toByteArray()
         Wearable.getMessageClient(this)
             .sendMessage(nodeId, Constants.PAYLOAD_PATH, payload)
-            .addOnSuccessListener { flushPendingQueue(nodeId) }
-            .addOnFailureListener {
+            .addOnSuccessListener {
+                Log.d("sendMessage", "Mensaje enviado correctamente a $nodeId")
+                flushPendingQueue(nodeId)
+            }
+            .addOnFailureListener { e ->
+                Log.d("sendMessage", "Error al enviar mensaje a $nodeId: ${e.message}")
                 lifecycleScope.launch { pendingSyncQueue.enqueue(metrics) }
             }
     }
@@ -190,30 +193,6 @@ class MainActivity : ComponentActivity(),
             pendingSyncQueue.clear()
             Wearable.getMessageClient(this@MainActivity)
                 .sendMessage(nodeId, Constants.SYNC_COMPLETE_PATH, ByteArray(0))
-            // RF-18: notificar al usuario en el reloj cuando la sincronizacion se complete.
-            notifySyncComplete()
-        }
-    }
-
-    private fun notifySyncComplete() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-            != PackageManager.PERMISSION_GRANTED
-        ) return
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("HealthWatch")
-            .setContentText("Sincronizacion completada")
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-        NotificationManagerCompat.from(this).notify(SYNC_NOTIFICATION_ID, notification)
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "Sincronizacion", NotificationManager.IMPORTANCE_LOW
-            )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
@@ -227,6 +206,10 @@ class MainActivity : ComponentActivity(),
 
     override fun onResume() {
         super.onResume()
+        // Igual que registrarSensores() en la app de referencia: se reintenta en cada onResume
+        // sin condicion (tras volver del dialogo de permisos, al despertar la pantalla, etc.).
+        healthSensorManager.start()
+        sendHandler.post(sendRunnable)
         try {
             Wearable.getDataClient(this).addListener(this)
             Wearable.getMessageClient(this).addListener(this)
@@ -243,6 +226,8 @@ class MainActivity : ComponentActivity(),
 
     override fun onPause() {
         super.onPause()
+        healthSensorManager.stop()
+        sendHandler.removeCallbacks(sendRunnable)
         try {
             Wearable.getDataClient(this).removeListener(this)
             Wearable.getMessageClient(this).removeListener(this)
@@ -260,7 +245,6 @@ class MainActivity : ComponentActivity(),
     }
 
     companion object {
-        private const val CHANNEL_ID = "sync_channel"
-        private const val SYNC_NOTIFICATION_ID = 1
+        private const val SENSOR_PERMISSION_REQUEST_CODE = 1001
     }
 }
